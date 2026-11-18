@@ -138,6 +138,8 @@ Positive amount + separate direction: the sign can't be silently flipped, sums p
 
 **job_locks** — `job_name` (UNIQUE), `last_started_at`. One seeded row per job.
 
+Column-level constraints settled during schema review (nullability, ranges, enums) are recorded in docs/schema.md §4.
+
 ### 3.3 Database-level protections
 
 | Protection | Mechanism |

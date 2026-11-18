@@ -115,7 +115,7 @@ These are decided here, beyond what `DESIGN.md` §3.2 lists:
 | Column or rule | Constraint | Why |
 |---|---|---|
 | `transfers.initiated_by` | `NOT NULL` | Every flow has a user: owners top up and transfer, admins reverse. Nothing creates transfers on its own. |
-| `users.phone` | `NOT NULL UNIQUE`, stored in E.164 (`+919876543210`) | `POST /users` requires a phone. The API validates and normalizes it before insert, so `98765 43210` and `+91-9876543210` can't slip past `UNIQUE` as two different strings. |
+| `users.phone` | `NOT NULL UNIQUE`, stored in E.164 (`+919876543210`); the 1.2 migration adds `CHECK (phone ~ '^\+[1-9][0-9]{7,14}$')` | `POST /users` requires a phone. The API validates and normalizes it before insert, so `98765 43210` and `+91-9876543210` can't slip past `UNIQUE` as two different strings. The `CHECK` makes the database reject anything that isn't E.164, even if a write bypasses the API. |
 | `holds.amount` | `CHECK (amount > 0)` | Same rule as `transfers.amount` and `ledger_entries.amount`: a zero hold reserves nothing. |
 | Per-transfer balance (deferred trigger) | At commit, Σ debits and Σ credits for the transfer must each equal `transfers.amount` | Debits = credits alone would accept a ₹100 transfer posted as ₹200 each way. The trigger checks totals only; it doesn't restrict how many entries a transfer has. |
 | `risk_flags.action_taken` | `CHECK (action_taken IN ('hold', 'flag'))` | The same two actions `risk_rules.action` allows. |
