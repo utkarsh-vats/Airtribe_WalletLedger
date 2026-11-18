@@ -27,7 +27,10 @@ services:
       - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
     mem_limit: 1g
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      # TCP, not the Unix socket: on first init the image runs a temporary socket-only server for
+      # the initdb scripts, then restarts. A socket check passes during that window and lets
+      # `migrate` connect while the real server is still starting ("database system is starting up").
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
       retries: 10
