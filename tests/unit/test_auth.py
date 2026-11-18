@@ -27,20 +27,13 @@ from app.auth.passwords import (
 from app.auth.tokens import InvalidTokenError, Principal, decode_token, issue_token
 from app.config import DEV_JWT_SECRET, Settings
 from app.main import create_app
+from tests.fakes import FixedClock
 
 SECRET = "unit-test-secret-that-is-at-least-32-bytes-long"
 T0 = datetime(2030, 1, 15, 10, 0, 0, tzinfo=UTC)
 TTL = timedelta(minutes=60)
 USER = Principal(id=7, role="user")
 ADMIN = Principal(id=1, role="admin")
-
-
-class FixedClock:
-    def __init__(self, now: datetime) -> None:
-        self.current = now
-
-    def now(self) -> datetime:
-        return self.current
 
 
 # --- passwords ---

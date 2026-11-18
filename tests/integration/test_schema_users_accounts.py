@@ -78,6 +78,9 @@ async def test_runtime_role_can_update_only_granted_columns(tx: AsyncConnection)
         text("UPDATE users SET kyc_status = 'verified', updated_at = now() WHERE id = :u"),
         {"u": user_id},
     )
+    await tx.execute(  # 0009: login rehashes an outdated password hash
+        text("UPDATE users SET password_hash = 'rehashed' WHERE id = :u"), {"u": user_id}
+    )
 
     with pytest.raises(DBAPIError) as exc_info:
         await tx.execute(text("UPDATE users SET role = 'admin' WHERE id = :u"), {"u": user_id})

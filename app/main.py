@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.auth.router import router as auth_router
 from app.clock import Clock, SystemClock
 from app.config import Settings, get_settings
 from app.db import create_engine
@@ -34,6 +35,7 @@ def create_app(settings: Settings | None = None, clock: Clock | None = None) -> 
     app.state.clock = clock or SystemClock()
     app.add_middleware(RequestIdMiddleware)
     register_error_handlers(app)
+    app.include_router(auth_router)
     app.include_router(wallet_router)
 
     @app.get("/health", tags=["meta"])

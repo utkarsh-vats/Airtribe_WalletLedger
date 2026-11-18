@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator, Iterator
+from datetime import UTC, datetime
 
 import pytest
 from alembic import command
@@ -10,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_en
 from app.config import get_settings
 from app.db import create_engine
 from app.main import create_app
+from tests.fakes import FixedClock
 
 
 @pytest.fixture(scope="session")
@@ -76,15 +78,26 @@ async def owner_tx(owner_engine: AsyncEngine) -> AsyncIterator[AsyncConnection]:
 API_TEST_EMAIL_DOMAIN = "api-tests.example.com"
 
 
+# The app's clock in API tests: a fixed instant, never the wall clock (DESIGN.md §11).
+API_TEST_NOW = datetime(2030, 1, 15, 10, 0, 0, tzinfo=UTC)
+
+
 @pytest.fixture
-async def api(engine: AsyncEngine, owner_engine: AsyncEngine) -> AsyncIterator[AsyncClient]:
+def clock() -> FixedClock:
+    return FixedClock(API_TEST_NOW)
+
+
+@pytest.fixture
+async def api(
+    engine: AsyncEngine, owner_engine: AsyncEngine, clock: FixedClock
+) -> AsyncIterator[AsyncClient]:
     """HTTP client for the real app against the test database, lifespan included.
 
     Afterwards, users created under API_TEST_EMAIL_DOMAIN are deleted as wallet_owner
     (wallet_app has no DELETE). Tests that later create wallets or transfers will need the
     superuser reset fixture planned for 2.9 instead.
     """
-    app = create_app(get_settings())
+    app = create_app(get_settings(), clock=clock)
     try:
         async with (
             app.router.lifespan_context(app),
