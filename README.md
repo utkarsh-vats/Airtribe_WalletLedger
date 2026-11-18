@@ -80,6 +80,47 @@ uv run alembic upgrade head --sql              # print the SQL instead of runnin
 
 `docker compose up` runs both upgrades for you through the `migrate` service.
 
+| Migration | Adds |
+|---|---|
+| `0001` | Empty baseline |
+| `0002` | `users`, `accounts`, and the three system accounts (`cash_in`, `cash_out`, `fee_revenue`) |
+| `0003` | `transfers`, `ledger_entries`, `holds`, `transfer_status_history`, and their indexes |
+| `0004` | Append-only triggers; `wallet_app` grants on the money tables |
+| `0005` | Deferred per-transfer balance check |
+| `0006` | Status-history trigger |
+| `0007` | `idempotency_keys`, `risk_rules` (seeded), `risk_flags`, `reconciliation_runs`, `reconciliation_issues`, `job_locks` (seeded) |
+| `0008` | Revokes `TEMPORARY` from `wallet_app` |
+
+## Schema and what the database enforces
+
+Tables, relationships and the reasoning behind each constraint are in
+[`docs/schema.md`](docs/schema.md), with an ER diagram. Money is `BIGINT` paise everywhere.
+
+The rules that keep the books correct are enforced by Postgres itself, so a bug in the API
+can't break them:
+
+| Rule | How |
+|---|---|
+| A wallet is never overdrawn | `CHECK (account_type <> 'user_wallet' OR balance - held_amount >= 0)` on `accounts` |
+| Ledger entries and the audit log can't be changed | `BEFORE UPDATE OR DELETE` and `BEFORE TRUNCATE` triggers raise, even for the owner; `wallet_app` can only insert entries and only read the audit log |
+| Every transfer balances | Deferred constraint triggers check at `COMMIT`: a completed or reversed transfer has entries whose debits and credits each equal its amount; a held or rejected one has none. Violations raise SQLSTATE `23514` |
+| Every status change is recorded | A trigger writes `transfer_status_history` on insert and on every real status change. The actor and the reason come from `app.actor_id` and `app.status_reason`, set for the current transaction only by `app/db.py` (`set_actor`, `set_status_reason`) |
+| A retried request can't run twice | `UNIQUE NULLS NOT DISTINCT (user_id, key)` on `idempotency_keys` |
+| The runtime role can only do its job | `wallet_app` gets table and column grants written in each migration, for example only `UPDATE (status, updated_at)` on `transfers`. It can't create any object |
+
+Two of these triggers need care when changing them:
+
+- The status-history function is `SECURITY DEFINER` (owned by `wallet_owner`, `search_path`
+  pinned, `EXECUTE` revoked from `PUBLIC`), because `wallet_app` has no `INSERT` on the audit
+  table. A history row can only come from a real status change.
+- Tests can't commit rows into append-only tables, because those rows could never be cleaned up.
+  Schema tests run in rolled-back transactions and use `SET CONSTRAINTS ALL IMMEDIATE` to run
+  the deferred balance check before the rollback.
+
+Every `CHECK`, `UNIQUE` and unique index in the schema has a test that tries to break it and
+asserts the exact constraint name (`tests/integration/test_schema_rejections.py`). A guard test
+fails if a new constraint is added without one.
+
 ## Development and tests
 
 Requires [uv](https://docs.astral.sh/uv/); Python 3.14 is installed by uv from `.python-version`.

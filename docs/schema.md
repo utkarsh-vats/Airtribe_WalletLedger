@@ -283,7 +283,9 @@ erDiagram
 ```
 
 The diagram can't express the rules that hold across columns. Those are `CHECK` constraints
-and triggers, listed in `DESIGN.md` §3.2–3.3 and tested in step 1.6:
+and triggers, listed in `DESIGN.md` §3.2–3.3 and in §4 above. Each one has a test that tries to
+break it (`tests/integration/test_schema_rejections.py`, `test_schema_balance.py`,
+`test_schema_protections.py`):
 
 - a wallet has a user and a system account doesn't;
 - there is exactly one row per system account (a partial unique index);
