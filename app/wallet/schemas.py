@@ -22,11 +22,20 @@ class CreateUserRequest(BaseModel):
     password: Password
 
 
+KycStatus = Literal["pending", "verified", "rejected"]
+
+
+class SetKycRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kyc_status: KycStatus
+
+
 class UserResponse(BaseModel):
     id: int
     name: str
     email: str
     phone: str
     role: Literal["user", "admin"]
-    kyc_status: Literal["pending", "verified", "rejected"]
+    kyc_status: KycStatus
     created_at: datetime

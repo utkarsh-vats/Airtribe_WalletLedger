@@ -9,6 +9,7 @@ from app.config import Settings, get_settings
 from app.db import create_engine
 from app.errors import register_error_handlers
 from app.middleware import RequestIdMiddleware
+from app.wallet.router import admin_router as wallet_admin_router
 from app.wallet.router import router as wallet_router
 
 
@@ -37,6 +38,7 @@ def create_app(settings: Settings | None = None, clock: Clock | None = None) -> 
     register_error_handlers(app)
     app.include_router(auth_router)
     app.include_router(wallet_router)
+    app.include_router(wallet_admin_router)
 
     @app.get("/health", tags=["meta"])
     async def health() -> dict[str, str]:

@@ -55,10 +55,17 @@ services:
   migrate:
     build: .
     image: walletledger-api:dev
-    command: ["sh", "-c", "alembic upgrade head && alembic -x target=test upgrade head"]
+    command:
+      - sh
+      - -c
+      - alembic upgrade head && alembic -x target=test upgrade head && python -m app.auth.admin_seed
     environment:
       MIGRATION_DATABASE_URL: postgresql+asyncpg://wallet_owner:${WALLET_OWNER_PASSWORD:-wallet_owner}@postgres:5432/${POSTGRES_DB:-walletledger}
       TEST_MIGRATION_DATABASE_URL: postgresql+asyncpg://wallet_owner:${WALLET_OWNER_PASSWORD:-wallet_owner}@postgres:5432/${POSTGRES_TEST_DB:-walletledger_test}
+      # Admin seed for the dev database; skipped when unset (no default admin).
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_PHONE: ${ADMIN_PHONE:-+910000000000}
     depends_on:
       postgres:
         condition: service_healthy

@@ -5,9 +5,9 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.auth.passwords import hash_password
 from app.db import UNIQUE_VIOLATION, constraint_violated, transaction
-from app.errors import ConflictError
+from app.errors import ConflictError, NotFoundError
 from app.wallet import repository
-from app.wallet.schemas import CreateUserRequest, UserResponse
+from app.wallet.schemas import CreateUserRequest, SetKycRequest, UserResponse
 
 _UNIQUE_USER_FIELDS = {
     "users_email_lower_key": ("EMAIL_ALREADY_REGISTERED", "That email is already registered."),
@@ -33,4 +33,17 @@ async def create_user(conn: AsyncConnection, request: CreateUserRequest) -> User
             code, message = _UNIQUE_USER_FIELDS[constraint]
             raise ConflictError(message, code=code) from None
         raise
+    return UserResponse.model_validate(row)
+
+
+async def set_kyc_status(
+    conn: AsyncConnection, user_id: int, request: SetKycRequest, *, admin_id: int
+) -> UserResponse:
+    """Admin sets a user's KYC status (DESIGN.md §6). Any status may follow any other."""
+    async with transaction(conn, actor_id=admin_id):
+        row = await repository.update_kyc_status(
+            conn, user_id=user_id, kyc_status=request.kyc_status
+        )
+    if row is None:
+        raise NotFoundError("User not found.", code="USER_NOT_FOUND")
     return UserResponse.model_validate(row)

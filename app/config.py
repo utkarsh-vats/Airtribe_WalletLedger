@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     jwt_secret: SecretStr = SecretStr(DEV_JWT_SECRET)
     jwt_ttl_minutes: int = 60
 
+    # Admin seed (app/auth/admin_seed.py, run by `migrate`). Empty = skip seeding.
+    admin_email: str = ""
+    admin_password: SecretStr = SecretStr("")
+    admin_phone: str = "+910000000000"
+
     @model_validator(mode="after")
     def _check_jwt_secret(self) -> Self:
         secret = self.jwt_secret.get_secret_value()
