@@ -121,6 +121,16 @@ These are decided here, beyond what `DESIGN.md` §3.2 lists:
 | Per-transfer balance (deferred trigger) | At commit, Σ debits and Σ credits for the transfer must each equal `transfers.amount` | Debits = credits alone would accept a ₹100 transfer posted as ₹200 each way. The trigger checks totals only; it doesn't restrict how many entries a transfer has. |
 | `risk_flags.action_taken` | `CHECK (action_taken IN ('hold', 'flag'))` | The same two actions `risk_rules.action` allows. |
 | `reconciliation_issues.entity_id` | Nullable; `CHECK ((entity_type = 'ledger') = (entity_id IS NULL))` | A ledger-wide issue (the global balance check) has no single entity. |
+| `idempotency_keys.request_hash` | `CHECK (request_hash ~ '^[0-9a-f]{64}$')` | It is a lowercase sha256 hex digest; anything else means the hash was computed or encoded differently and would never match a retry. |
+| `idempotency_keys.response_code` | `CHECK (response_code BETWEEN 200 AND 499)` | Only 2xx and 4xx responses are stored; a 5xx rolls the key back with everything else. |
+| `idempotency_keys` completion | `completed` ⇔ `response_code`, `response_body` and `completed_at` all set; `in_progress` ⇔ all NULL | A completed key must be replayable byte for byte; an in-progress key has nothing to replay yet. |
+| `risk_rules.params` | `CHECK (jsonb_typeof(params) = 'object')` | Rules read named thresholds; a scalar or array can't hold them. |
+| `risk_flags.details` | `NOT NULL`, `CHECK (jsonb_typeof(details) = 'object')` | Every flag records the values the rule observed, as named fields. |
+| `risk_flags` explanation | `llm_explanation`, `llm_label`, `llm_model`, `explained_at` are all NULL or all set | An explanation is saved whole or not at all; invalid LLM output is never stored. |
+| `reconciliation_runs` counts | `checks_run`, `issue_count` `NOT NULL DEFAULT 0`, `CHECK (… >= 0)` | Counts can't be negative, and a queued run starts at zero. |
+| `reconciliation_runs` lifecycle | `queued`: no `started_at`/`finished_at`; `running`: `started_at` only; `passed`/`failed`/`skipped`/`error`: both, `finished_at >= started_at` | Timings in the run report always match the status. A skipped run was marked `running` first (DESIGN.md §8.1). |
+| `reconciliation_runs` outcome | `passed` ⇒ `issue_count = 0`; `failed` ⇒ `issue_count > 0`; `error` ⇒ `error_message` set | The status can't contradict the findings, and an errored run always says why. |
+| `job_locks` seed | One row each: `reconciliation`, `flag_explanations`, `idempotency_cleanup` | One lockable row per scheduled job; DESIGN.md names `reconciliation`, the other two are the remaining nightly jobs. |
 
 ## 5. ER diagram
 

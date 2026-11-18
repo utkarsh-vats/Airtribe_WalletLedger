@@ -26,7 +26,7 @@ TABLES = (
     "job_locks",
 )
 
-# DESIGN.md §3.4 for these tables (+ reconciliation_issues (run_id), proposed in review).
+# DESIGN.md §3.4 for these tables.
 EXPECTED_INDEXES = {
     "idempotency_keys_created_idx": "(created_at)",
     "risk_flags_unexplained_idx": "(created_at) WHERE (llm_label IS NULL)",

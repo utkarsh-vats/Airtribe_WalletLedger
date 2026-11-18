@@ -168,6 +168,7 @@ Corruption tests bypass these on purpose: they connect as the Postgres superuser
 | `risk_flags (created_at) WHERE llm_label IS NULL` | Nightly explanation step |
 | `transfer_status_history (transfer_id)` | Transfer detail |
 | `idempotency_keys (created_at)` | Cleanup job |
+| `reconciliation_issues (run_id)` | Run report lists a run's issues |
 
 `created_at` uses `now()`, which is the transaction start time — every entry of one transfer shares a timestamp. `id DESC` is the tie-breaker everywhere ordering matters.
 
