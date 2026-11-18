@@ -3,10 +3,13 @@ from collections.abc import AsyncIterator, Iterator
 import pytest
 from alembic import command
 from alembic.config import Config
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
 from app.config import get_settings
 from app.db import create_engine
+from app.main import create_app
 
 
 @pytest.fixture(scope="session")
@@ -64,3 +67,33 @@ async def owner_tx(owner_engine: AsyncEngine) -> AsyncIterator[AsyncConnection]:
             yield c
         finally:
             await trans.rollback()
+
+
+# --- API tests ---------------------------------------------------------------------------------
+
+# Every user an API test creates uses this email domain, so cleanup can find them. API tests
+# commit real rows (they go through the service's own transaction), unlike the schema tests.
+API_TEST_EMAIL_DOMAIN = "api-tests.example.com"
+
+
+@pytest.fixture
+async def api(engine: AsyncEngine, owner_engine: AsyncEngine) -> AsyncIterator[AsyncClient]:
+    """HTTP client for the real app against the test database, lifespan included.
+
+    Afterwards, users created under API_TEST_EMAIL_DOMAIN are deleted as wallet_owner
+    (wallet_app has no DELETE). Tests that later create wallets or transfers will need the
+    superuser reset fixture planned for 2.9 instead.
+    """
+    app = create_app(get_settings())
+    try:
+        async with (
+            app.router.lifespan_context(app),
+            AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client,
+        ):
+            yield client
+    finally:
+        async with owner_engine.begin() as owner:
+            await owner.execute(
+                text("DELETE FROM users WHERE email LIKE :pattern"),
+                {"pattern": f"%@{API_TEST_EMAIL_DOMAIN}"},
+            )

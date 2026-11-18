@@ -8,6 +8,7 @@ from app.config import Settings, get_settings
 from app.db import create_engine
 from app.errors import register_error_handlers
 from app.middleware import RequestIdMiddleware
+from app.wallet.router import router as wallet_router
 
 
 def create_app(settings: Settings | None = None, clock: Clock | None = None) -> FastAPI:
@@ -33,6 +34,7 @@ def create_app(settings: Settings | None = None, clock: Clock | None = None) -> 
     app.state.clock = clock or SystemClock()
     app.add_middleware(RequestIdMiddleware)
     register_error_handlers(app)
+    app.include_router(wallet_router)
 
     @app.get("/health", tags=["meta"])
     async def health() -> dict[str, str]:

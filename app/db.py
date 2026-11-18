@@ -15,6 +15,7 @@ from typing import Literal
 
 from fastapi import Request
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
 from app.config import Settings
@@ -27,6 +28,22 @@ _ISOLATION_SQL: dict[str, str] = {
     "REPEATABLE READ": "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ",
     "SERIALIZABLE": "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE",
 }
+
+
+UNIQUE_VIOLATION = "23505"
+CHECK_VIOLATION = "23514"
+
+
+def constraint_violated(exc: DBAPIError, sqlstate: str) -> str | None:
+    """The constraint name behind a database error with this SQLSTATE, else None.
+
+    Services map known constraint names to API errors (every constraint is named explicitly
+    in the migrations for this purpose) and re-raise anything else.
+    """
+    driver_error = getattr(exc.orig, "__cause__", None)  # asyncpg's exception carries details
+    if getattr(driver_error, "sqlstate", None) != sqlstate:
+        return None
+    return getattr(driver_error, "constraint_name", None)
 
 
 def create_engine(settings: Settings) -> AsyncEngine:
