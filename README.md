@@ -35,6 +35,7 @@ The default passwords are weak on purpose and safe only because Postgres and Red
 | `POSTGRES_PASSWORD` | `walletledger` | Postgres superuser |
 | `WALLET_OWNER_PASSWORD` / `WALLET_APP_PASSWORD` | `wallet_owner` / `wallet_app` | App roles, see below |
 | `DATABASE_URL`, `TEST_DATABASE_URL`, `MIGRATION_DATABASE_URL`, `TEST_MIGRATION_DATABASE_URL` | localhost:5433 URLs | Running the app, tests and Alembic from the host |
+| `JWT_SECRET` | A dev-only value, refused when `APP_ENV=prod` | Signing access tokens; at least 32 bytes. Generate one with `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
 
 Postgres reads its passwords only when the data volume is first created. After changing them,
 or `docker/postgres/initdb/`, the volume has to be recreated with
@@ -120,6 +121,27 @@ Two of these triggers need care when changing them:
 Every `CHECK`, `UNIQUE` and unique index in the schema has a test that tries to break it and
 asserts the exact constraint name (`tests/integration/test_schema_rejections.py`). A guard test
 fails if a new constraint is added without one.
+
+## Authentication
+
+Login endpoints arrive in step 2.1b; the pieces they use are in `app/auth/`.
+
+- **Access tokens** are HS256 JWTs signed with `JWT_SECRET`, valid for 60 minutes, with no
+  refresh tokens. They carry the user id (`sub`) and `role`. Routes take the caller from the
+  `CurrentUser` dependency, or `AdminUser` for admin-only routes. A missing, malformed, wrongly
+  signed or expired token gets `401 UNAUTHORIZED` with `WWW-Authenticate: Bearer`, and the
+  message never says which check failed. A valid token without the admin role gets
+  `403 FORBIDDEN` on admin routes.
+- **The role lives in the token,** so admin checks need no database read. The trade-off: if a
+  user's role changes, the change applies from their next token, so within 60 minutes. No
+  endpoint changes roles today.
+- **Expiry is checked against an injected clock** (`app/clock.py`), not the wall clock, so tests
+  pin time instead of sleeping.
+- **Passwords** are hashed with argon2id at OWASP's baseline: 19 MiB of memory, 2 iterations,
+  1 lane. Hashing runs in worker threads, never on the event loop, with at most 4 at once. That
+  keeps a burst of logins from stalling other requests and caps argon2's memory at about 76 MiB.
+  Hashes record their own parameters, so if the parameters change, an older hash is upgraded
+  on the user's next successful login.
 
 ## Development and tests
 
