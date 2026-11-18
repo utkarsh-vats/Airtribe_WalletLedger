@@ -3,15 +3,20 @@
 Time is pinned with a fixed clock; nothing here reads the wall clock.
 """
 
+import asyncio
+import threading
+import time
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 
 import jwt
 import pytest
+from argon2 import PasswordHasher
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from pydantic import SecretStr, ValidationError
 
+from app.auth import passwords
 from app.auth.deps import AdminUser, CurrentUser
 from app.auth.passwords import (
     hash_password,
@@ -41,25 +46,72 @@ class FixedClock:
 # --- passwords ---
 
 
-def test_hash_is_argon2id_and_salted() -> None:
-    first, second = hash_password("correct horse"), hash_password("correct horse")
+async def test_hash_is_argon2id_at_owasp_baseline_and_salted() -> None:
+    first, second = await hash_password("correct horse"), await hash_password("correct horse")
 
-    assert first.startswith("$argon2id$")
+    assert first.startswith("$argon2id$v=19$m=19456,t=2,p=1$")
     assert first != second  # random salt
     assert "correct horse" not in first
 
 
-def test_verify_password() -> None:
-    stored = hash_password("correct horse")
+async def test_verify_password() -> None:
+    stored = await hash_password("correct horse")
 
-    assert verify_password(stored, "correct horse") is True
-    assert verify_password(stored, "Correct horse") is False
-    assert verify_password("not-a-hash", "correct horse") is False
-    assert needs_rehash(stored) is False
+    assert await verify_password(stored, "correct horse") is True
+    assert await verify_password(stored, "Correct horse") is False
+    assert await verify_password("not-a-hash", "correct horse") is False
 
 
-def test_verify_against_dummy_never_raises() -> None:
-    verify_against_dummy("anything")
+async def test_older_parameters_need_rehash() -> None:
+    current = await hash_password("correct horse")
+    old = PasswordHasher(time_cost=3, memory_cost=65_536, parallelism=4).hash("correct horse")
+
+    assert needs_rehash(current) is False
+    assert needs_rehash(old) is True
+    assert await verify_password(old, "correct horse") is True  # still verifies until upgraded
+
+
+async def test_verify_against_dummy_never_raises() -> None:
+    await verify_against_dummy("anything")
+
+
+async def test_hashing_does_not_block_the_event_loop() -> None:
+    """If argon2 ran on the loop, the hash task would finish inside its first step, before
+    the ticker below got a turn. In a worker thread it is still running while the ticker,
+    a trivial coroutine, completes promptly."""
+    hashing = asyncio.create_task(hash_password("correct horse"))
+    await asyncio.sleep(0)  # let the task start and hand the work to a thread
+
+    started = time.perf_counter()
+    for _ in range(5):
+        await asyncio.sleep(0)
+    ticker_took = time.perf_counter() - started
+
+    assert not hashing.done()
+    assert ticker_took < 0.05  # generous for loaded CI; the done() check is the real proof
+    assert (await hashing).startswith("$argon2id$")
+
+
+async def test_at_most_four_hashes_run_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    running = peak = 0
+    lock = threading.Lock()
+
+    def slow_hash(password: str) -> str:
+        nonlocal running, peak
+        with lock:
+            running += 1
+            peak = max(peak, running)
+        threading.Event().wait(0.02)  # stand-in for argon2's work, off the loop
+        with lock:
+            running -= 1
+        return "hashed"
+
+    monkeypatch.setattr(passwords, "_hash_sync", slow_hash)
+
+    results = await asyncio.gather(*(hash_password("p") for _ in range(12)))
+
+    assert results == ["hashed"] * 12
+    assert peak == passwords.MAX_CONCURRENT_HASHES == 4
 
 
 # --- tokens ---
