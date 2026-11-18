@@ -16,6 +16,7 @@ EXPECTED_INDEXES = {
     "WHERE (status = 'completed'::text)",
     "transfers_to_created_idx": "(to_account_id, created_at)",
     "transfers_held_created_idx": "(created_at) WHERE (status = 'held'::text)",
+    "transfers_parent_transfer_idx": "(parent_transfer_id) WHERE (parent_transfer_id IS NOT NULL)",
     "transfer_status_history_transfer_idx": "(transfer_id)",
 }
 

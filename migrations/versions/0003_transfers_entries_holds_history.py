@@ -1,8 +1,9 @@
 """transfers, ledger_entries, holds, transfer_status_history and their indexes
 
-Tables from DESIGN.md §3.2 (plus docs/schema.md §4: initiated_by NOT NULL, holds.amount > 0),
-indexes from §3.4. No grants here: wallet_app gets its privileges on these tables in 0004,
-together with the immutability and audit triggers.
+Tables from DESIGN.md §3.2 (plus docs/schema.md §4: initiated_by NOT NULL, holds.amount > 0,
+holds resolution check), indexes from §3.4 (incl. parent_transfer_id, added in review).
+No grants here: wallet_app gets its privileges on these tables in 0004, together with the
+immutability and audit triggers.
 
 Revision ID: 0003
 Revises: 0002
@@ -81,7 +82,10 @@ UPGRADE = [
 
         CONSTRAINT holds_transfer_id_key UNIQUE (transfer_id),
         CONSTRAINT holds_amount_check    CHECK (amount > 0),
-        CONSTRAINT holds_status_check    CHECK (status IN ('active', 'captured', 'voided'))
+        CONSTRAINT holds_status_check    CHECK (status IN ('active', 'captured', 'voided')),
+        -- Resolved holds always have a timestamp; active ones never do. resolved_by stays
+        -- nullable: a future system-driven resolution has no user.
+        CONSTRAINT holds_resolution_check CHECK ((status = 'active') = (resolved_at IS NULL))
     )
     """,
     # --- transfer_status_history: audit log, written by the 0004 trigger ---
@@ -125,6 +129,11 @@ UPGRADE = [
     "CREATE INDEX transfers_to_created_idx ON transfers (to_account_id, created_at)",
     # Admin risk queue.
     "CREATE INDEX transfers_held_created_idx ON transfers (created_at) WHERE status = 'held'",
+    # Reversal finds child fee transfers. Partial: only fee rows have a parent, so it stays tiny.
+    """
+    CREATE INDEX transfers_parent_transfer_idx
+        ON transfers (parent_transfer_id) WHERE parent_transfer_id IS NOT NULL
+    """,
     # Transfer detail.
     """
     CREATE INDEX transfer_status_history_transfer_idx
