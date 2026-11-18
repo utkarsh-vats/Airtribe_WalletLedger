@@ -3,7 +3,7 @@
 #
 # Creates the two application roles and the test database:
 #   wallet_owner  owns the databases and every schema object; Alembic connects as this role.
-#   wallet_app    runtime role; gets CONNECT/TEMPORARY + schema USAGE here, and table-level
+#   wallet_app    runtime role; gets CONNECT + schema USAGE here (no TEMPORARY), and table-level
 #                 grants are written explicitly in each migration (least privilege).
 # Passwords are passed as psql variables (:'name'), never spliced into SQL text.
 set -euo pipefail
@@ -32,7 +32,7 @@ SQL
 for db in "$POSTGRES_DB" "$TEST_DB"; do
   psql_su --dbname "$db" -v db="$db" <<'SQL'
 REVOKE ALL ON DATABASE :"db" FROM PUBLIC;
-GRANT CONNECT, TEMPORARY ON DATABASE :"db" TO wallet_app;
+GRANT CONNECT ON DATABASE :"db" TO wallet_app;
 
 -- public is owned by pg_database_owner (PG15+), i.e. wallet_owner. Nobody else may create in it.
 REVOKE ALL ON SCHEMA public FROM PUBLIC;

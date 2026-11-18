@@ -58,7 +58,7 @@ One Postgres container holds two databases, `walletledger` (dev) and `walletledg
 | Role | Can do | Used by |
 |---|---|---|
 | `wallet_owner` | Owns both databases, the `public` schema and every object in it | Alembic only |
-| `wallet_app` | Connect and use temporary tables, plus whatever each migration explicitly grants it | The API (and the worker, once it exists) |
+| `wallet_app` | Connect, plus whatever each migration explicitly grants it; it can't create any object, not even a temporary table | The API (and the worker, once it exists) |
 
 Default `PUBLIC` access is revoked, so `wallet_app` can't create tables and can't read a table
 until a migration grants it. This is what lets the database itself enforce rules such as

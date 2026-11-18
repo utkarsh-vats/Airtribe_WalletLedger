@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import text
@@ -12,38 +13,65 @@ async def _scalar(conn: AsyncConnection, sql: str) -> object:
     return (await conn.execute(text(sql))).scalar_one()
 
 
-@pytest.fixture
-async def scratch(conn: AsyncConnection) -> AsyncIterator[AsyncConnection]:
-    """`conn` with a session-private temp table, committed so tests start with no tx open.
+# A fixed instant, not the wall clock: the commit test only needs a value it can recognise.
+_STAMP = datetime(2001, 2, 3, 4, 5, 6, tzinfo=UTC)
+_JOB = "flag_explanations"
 
-    Dropped afterwards: the pooled connection (and its temp tables) outlives the test.
+
+@pytest.fixture
+async def job_lock_row(conn: AsyncConnection) -> AsyncIterator[AsyncConnection]:
+    """`conn`, with the job_locks row's last_started_at restored after the test.
+
+    job_locks is the one table where a committed UPDATE adds no rows and touches nothing
+    append-only, so the commit test can really commit and still leave the database as it was.
     """
-    await conn.execute(text("CREATE TEMP TABLE scratch (x int NOT NULL)"))
-    await conn.commit()
+    async with transaction(conn):
+        before = await conn.scalar(
+            text("SELECT last_started_at FROM job_locks WHERE job_name = :j"), {"j": _JOB}
+        )
     yield conn
     if conn.in_transaction():
         await conn.rollback()
-    await conn.execute(text("DROP TABLE scratch"))
-    await conn.commit()
+    async with transaction(conn):
+        await conn.execute(
+            text("UPDATE job_locks SET last_started_at = :v WHERE job_name = :j"),
+            {"v": before, "j": _JOB},
+        )
 
 
-async def test_commit_persists(scratch: AsyncConnection) -> None:
-    async with transaction(scratch):
-        await scratch.execute(text("INSERT INTO scratch VALUES (1)"))
+async def test_commit_persists(job_lock_row: AsyncConnection, engine: AsyncEngine) -> None:
+    conn = job_lock_row
+    async with transaction(conn):
+        await conn.execute(
+            text("UPDATE job_locks SET last_started_at = :v WHERE job_name = :j"),
+            {"v": _STAMP, "j": _JOB},
+        )
 
-    assert not scratch.in_transaction()
-    async with transaction(scratch):
-        assert await _scalar(scratch, "SELECT count(*) FROM scratch") == 1
+    assert not conn.in_transaction()
+    async with engine.connect() as other, transaction(other):  # visible to another session
+        stored = await other.scalar(
+            text("SELECT last_started_at FROM job_locks WHERE job_name = :j"), {"j": _JOB}
+        )
+    assert stored == _STAMP
 
 
-async def test_exception_rolls_back(scratch: AsyncConnection) -> None:
+async def test_exception_rolls_back(conn: AsyncConnection) -> None:
     with pytest.raises(ValueError, match="boom"):
-        async with transaction(scratch):
-            await scratch.execute(text("INSERT INTO scratch VALUES (1)"))
+        async with transaction(conn):
+            await conn.execute(
+                text(
+                    "INSERT INTO users (name, email, phone, password_hash) "
+                    "VALUES ('T', 'rollback@example.test', '+919877777777', 'x')"
+                )
+            )
             raise ValueError("boom")
 
-    async with transaction(scratch):
-        assert await _scalar(scratch, "SELECT count(*) FROM scratch") == 0
+    assert not conn.in_transaction()
+    async with transaction(conn):
+        count = await conn.scalar(
+            text("SELECT count(*) FROM users WHERE email = 'rollback@example.test'")
+        )
+    assert count == 0
 
 
 async def test_actor_is_transaction_local(conn: AsyncConnection) -> None:
@@ -108,3 +136,26 @@ async def test_runtime_role_cannot_create_tables(conn: AsyncConnection) -> None:
             await conn.execute(text("CREATE TABLE public.should_fail (x int)"))
 
     assert exc_info.value.orig.sqlstate == "42501"  # type: ignore[union-attr]  # insufficient_privilege
+
+
+async def test_runtime_role_cannot_create_temporary_tables(conn: AsyncConnection) -> None:
+    """TEMPORARY was revoked in 0008: wallet_app can't create any object, not even a temp table."""
+    with pytest.raises(DBAPIError) as exc_info:
+        async with transaction(conn):
+            await conn.execute(text("CREATE TEMP TABLE should_fail (x int)"))
+
+    assert exc_info.value.orig.sqlstate == "42501"  # type: ignore[union-attr]  # insufficient_privilege
+
+
+async def test_runtime_role_has_only_connect_on_the_database(conn: AsyncConnection) -> None:
+    async with transaction(conn):
+        privileges = (
+            await conn.execute(
+                text(
+                    "SELECT has_database_privilege(current_database(), 'CONNECT'), "
+                    "has_database_privilege(current_database(), 'TEMPORARY'), "
+                    "has_database_privilege(current_database(), 'CREATE')"
+                )
+            )
+        ).one()
+    assert tuple(privileges) == (True, False, False)
