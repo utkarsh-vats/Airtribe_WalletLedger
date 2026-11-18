@@ -145,7 +145,7 @@ Positive amount + separate direction: the sign can't be silently flipped, sums p
 | Wallet never overdrawn | `CHECK (account_type <> 'user_wallet' OR balance - held_amount >= 0)` |
 | Entries append-only | `BEFORE UPDATE OR DELETE` row trigger and `BEFORE TRUNCATE` statement trigger raise; app role has only `SELECT, INSERT` on `ledger_entries` |
 | Audit log append-only | Same triggers + grants on `transfer_status_history` |
-| Every transfer balances | `CONSTRAINT TRIGGER … AFTER INSERT ON ledger_entries DEFERRABLE INITIALLY DEFERRED` — at commit, Σ debits must equal Σ credits for that transfer, else the whole transaction fails |
+| Every transfer balances | `CONSTRAINT TRIGGER … AFTER INSERT ON ledger_entries DEFERRABLE INITIALLY DEFERRED` — at commit, Σ debits and Σ credits for that transfer must each equal transfers.amount, else the whole transaction fails |
 | Every status change audited | `AFTER INSERT OR UPDATE OF status ON transfers` trigger writes history, reading the actor from `current_setting('app.actor_id', true)` set via `SET LOCAL` in the service transaction |
 | Idempotency key unique per user | `UNIQUE NULLS NOT DISTINCT (user_id, key)` |
 | Least privilege | Two roles: `wallet_owner` (migrations) and `wallet_app` (runtime). `wallet_app` gets column-level `UPDATE (status, updated_at)` on `transfers` |
