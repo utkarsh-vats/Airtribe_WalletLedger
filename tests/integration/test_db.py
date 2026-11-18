@@ -93,3 +93,18 @@ async def test_lock_timeout_aborts_a_blocked_wait(engine: AsyncEngine) -> None:
                     await waiter.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": 7_000_001})
 
     assert exc_info.value.orig.sqlstate == "55P03"  # type: ignore[union-attr]
+
+
+async def test_connects_to_test_database_as_runtime_role(conn: AsyncConnection) -> None:
+    async with transaction(conn):
+        assert await _scalar(conn, "SELECT current_database()") == "walletledger_test"
+        assert await _scalar(conn, "SELECT current_user") == "wallet_app"
+
+
+async def test_runtime_role_cannot_create_tables(conn: AsyncConnection) -> None:
+    """Schema changes belong to wallet_owner via migrations; wallet_app only gets table grants."""
+    with pytest.raises(DBAPIError) as exc_info:
+        async with transaction(conn):
+            await conn.execute(text("CREATE TABLE public.should_fail (x int)"))
+
+    assert exc_info.value.orig.sqlstate == "42501"  # type: ignore[union-attr]  # insufficient_privilege

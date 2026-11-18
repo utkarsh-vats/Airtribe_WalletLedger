@@ -14,11 +14,17 @@ services:
       # Local-only dev default; Postgres is bound to 127.0.0.1. Override in .env.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-walletledger}
       POSTGRES_DB: ${POSTGRES_DB:-walletledger}
+      POSTGRES_TEST_DB: ${POSTGRES_TEST_DB:-walletledger_test}
+      # Application roles, created by docker/postgres/initdb on first volume init.
+      WALLET_OWNER_PASSWORD: ${WALLET_OWNER_PASSWORD:-wallet_owner}
+      WALLET_APP_PASSWORD: ${WALLET_APP_PASSWORD:-wallet_app}
     ports:
       - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
       # Postgres 18 images keep data under /var/lib/postgresql/<major>/docker.
       - pgdata:/var/lib/postgresql
+      # Runs only when the data volume is created; changing it needs a fresh volume.
+      - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
     mem_limit: 1g
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
@@ -48,7 +54,8 @@ services:
     environment:
       APP_ENV: ${APP_ENV:-dev}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-walletledger}:${POSTGRES_PASSWORD:-walletledger}@postgres:5432/${POSTGRES_DB:-walletledger}
+      # Runtime role, not the superuser.
+      DATABASE_URL: postgresql+asyncpg://wallet_app:${WALLET_APP_PASSWORD:-wallet_app}@postgres:5432/${POSTGRES_DB:-walletledger}
       REDIS_URL: redis://redis:6379/0
     ports:
       - "${API_BIND_HOST:-127.0.0.1}:${API_HOST_PORT:-8010}:8000"

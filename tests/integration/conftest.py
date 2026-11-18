@@ -9,8 +9,11 @@ from app.db import create_engine
 
 @pytest.fixture(scope="session")
 async def engine() -> AsyncIterator[AsyncEngine]:
-    """Engine against the real Postgres from DATABASE_URL (compose: localhost:5433)."""
-    eng = create_engine(get_settings())
+    """Engine against the test database. tests/conftest.py has already pointed DATABASE_URL at
+    TEST_DATABASE_URL; the assert is a second line of defence."""
+    settings = get_settings()
+    assert settings.database_url == settings.test_database_url
+    eng = create_engine(settings)
     try:
         yield eng
     finally:

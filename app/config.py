@@ -12,8 +12,13 @@ class Settings(BaseSettings):
     app_env: Literal["dev", "test", "prod"] = "dev"
     log_level: str = "INFO"
 
-    # Host-side defaults match docker-compose port mappings; containers override these.
-    database_url: str = "postgresql+asyncpg://walletledger:walletledger@localhost:5433/walletledger"
+    # Host-side defaults match docker-compose port mappings and default passwords; containers
+    # override these. The app connects as the least-privilege runtime role `wallet_app`.
+    database_url: str = "postgresql+asyncpg://wallet_app:wallet_app@localhost:5433/walletledger"
+    # Integration tests connect here only, never to database_url (enforced in tests/conftest.py).
+    test_database_url: str = (
+        "postgresql+asyncpg://wallet_app:wallet_app@localhost:5433/walletledger_test"
+    )
     redis_url: str = "redis://localhost:6380/0"
 
 
