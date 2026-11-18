@@ -5,6 +5,8 @@ from fastapi import FastAPI
 
 from app.config import Settings, get_settings
 from app.db import create_engine
+from app.errors import register_error_handlers
+from app.middleware import RequestIdMiddleware
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -21,9 +23,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(
         title="Airtribe_WalletLedger",
         version="0.1.0",
-        debug=settings.app_env == "dev",
+        # Never debug: Starlette's debug mode replaces the 500 handler with an HTML traceback.
+        debug=False,
         lifespan=lifespan,
     )
+    app.add_middleware(RequestIdMiddleware)
+    register_error_handlers(app)
 
     @app.get("/health", tags=["meta"])
     async def health() -> dict[str, str]:
