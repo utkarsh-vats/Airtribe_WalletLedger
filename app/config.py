@@ -19,6 +19,13 @@ class Settings(BaseSettings):
     test_database_url: str = (
         "postgresql+asyncpg://wallet_app:wallet_app@localhost:5433/walletledger_test"
     )
+    # Migrations run as the schema owner `wallet_owner` (enforced in migrations/env.py).
+    migration_database_url: str = (
+        "postgresql+asyncpg://wallet_owner:wallet_owner@localhost:5433/walletledger"
+    )
+    test_migration_database_url: str = (
+        "postgresql+asyncpg://wallet_owner:wallet_owner@localhost:5433/walletledger_test"
+    )
     redis_url: str = "redis://localhost:6380/0"
 
 

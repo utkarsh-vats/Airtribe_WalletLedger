@@ -3,25 +3,28 @@ import pytest
 from app.config import Settings
 from tests.conftest import _check_test_database
 
-DEV = "postgresql+asyncpg://u:p@localhost:5433/walletledger"
+BASE = "postgresql+asyncpg://u:p@localhost:5433/"
+GOOD = {
+    "database_url": BASE + "walletledger",
+    "test_database_url": BASE + "walletledger_test",
+    "migration_database_url": BASE + "walletledger",
+    "test_migration_database_url": BASE + "walletledger_test",
+}
 
 
-def _settings(test_url: str) -> Settings:
-    return Settings(database_url=DEV, test_database_url=test_url)
+def test_accepts_separate_test_databases() -> None:
+    _check_test_database(Settings(**GOOD))
 
 
-def test_accepts_separate_test_database() -> None:
-    _check_test_database(_settings("postgresql+asyncpg://u:p@localhost:5433/walletledger_test"))
-
-
+@pytest.mark.parametrize("field", ["test_database_url", "test_migration_database_url"])
 @pytest.mark.parametrize(
-    "test_url",
+    "bad_url",
     [
-        DEV,  # same database
-        "postgresql+asyncpg://u:p@localhost:5433/walletledger_testing",  # wrong suffix
-        "postgresql+asyncpg://u:p@localhost:5433/",  # no database
+        BASE + "walletledger",  # same as dev
+        BASE + "walletledger_testing",  # wrong suffix
+        BASE,  # no database
     ],
 )
-def test_rejects_unsafe_test_database(test_url: str) -> None:
+def test_rejects_unsafe_test_database(field: str, bad_url: str) -> None:
     with pytest.raises(pytest.UsageError):
-        _check_test_database(_settings(test_url))
+        _check_test_database(Settings(**{**GOOD, field: bad_url}))

@@ -1,6 +1,8 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 
 import pytest
+from alembic import command
+from alembic.config import Config
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.config import get_settings
@@ -8,7 +10,20 @@ from app.db import create_engine
 
 
 @pytest.fixture(scope="session")
-async def engine() -> AsyncIterator[AsyncEngine]:
+def migrated_test_db() -> Iterator[None]:
+    """Upgrade the test database to head once per run.
+
+    Sync on purpose: migrations/env.py calls asyncio.run(), which can't nest inside the test
+    event loop. tests/conftest.py has already pointed MIGRATION_DATABASE_URL at the test DB.
+    """
+    settings = get_settings()
+    assert settings.migration_database_url == settings.test_migration_database_url
+    command.upgrade(Config("alembic.ini"), "head")
+    yield
+
+
+@pytest.fixture(scope="session")
+async def engine(migrated_test_db: None) -> AsyncIterator[AsyncEngine]:
     """Engine against the test database. tests/conftest.py has already pointed DATABASE_URL at
     TEST_DATABASE_URL; the assert is a second line of defence."""
     settings = get_settings()
