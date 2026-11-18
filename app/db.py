@@ -3,9 +3,10 @@
 Rules this module enforces:
 - A request gets a pooled connection with no transaction open. Services start one with
   `transaction(...)`, so BEGIN/COMMIT live in the service layer, visible in one place.
-- Session settings the database relies on (`app.actor_id` for the status-history trigger,
-  `lock_timeout`) are set with `set_config(name, value, true)`, the parameterised equivalent of
-  `SET LOCAL`: they last until the transaction ends and never leak to the next pool user.
+- Session settings the database relies on (`app.actor_id` and `app.status_reason` for the
+  status-history trigger, `lock_timeout`) are set with `set_config(name, value, true)`, the
+  parameterised equivalent of `SET LOCAL`: they last until the transaction ends and never leak
+  to the next pool user.
 """
 
 from collections.abc import AsyncIterator
@@ -53,6 +54,14 @@ async def set_actor(conn: AsyncConnection, actor_id: int | None) -> None:
     """Record who is acting, for the transfer status-history trigger. NULL means system."""
     value = "" if actor_id is None else str(actor_id)
     await conn.execute(text("SELECT set_config('app.actor_id', :v, true)"), {"v": value})
+
+
+async def set_status_reason(conn: AsyncConnection, reason: str | None) -> None:
+    """Reason recorded by the status-history trigger for status changes later in this
+    transaction (e.g. an admin's release/reject note). None clears it."""
+    await conn.execute(
+        text("SELECT set_config('app.status_reason', :v, true)"), {"v": reason or ""}
+    )
 
 
 @asynccontextmanager
