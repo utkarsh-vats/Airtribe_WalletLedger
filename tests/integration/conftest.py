@@ -3,7 +3,7 @@ from collections.abc import AsyncIterator, Iterator
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
 from app.config import get_settings
 from app.db import create_engine
@@ -40,3 +40,27 @@ async def conn(engine: AsyncEngine) -> AsyncIterator[AsyncConnection]:
     """A fresh pooled connection with no transaction open, like `get_conn` gives a request."""
     async with engine.connect() as c:
         yield c
+
+
+@pytest.fixture(scope="session")
+async def owner_engine(migrated_test_db: None) -> AsyncIterator[AsyncEngine]:
+    """Engine connected as wallet_owner, for schema checks and set-up the app role can't do.
+    MIGRATION_DATABASE_URL already points at the test database (tests/conftest.py)."""
+    settings = get_settings()
+    assert settings.migration_database_url == settings.test_migration_database_url
+    eng = create_async_engine(settings.migration_database_url)
+    try:
+        yield eng
+    finally:
+        await eng.dispose()
+
+
+@pytest.fixture
+async def owner_tx(owner_engine: AsyncEngine) -> AsyncIterator[AsyncConnection]:
+    """wallet_owner connection inside a transaction that is always rolled back."""
+    async with owner_engine.connect() as c:
+        trans = await c.begin()
+        try:
+            yield c
+        finally:
+            await trans.rollback()
