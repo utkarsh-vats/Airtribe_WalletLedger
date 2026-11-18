@@ -35,7 +35,7 @@ select = ["E", "F", "W", "I", "B", "UP", "ASYNC", "S", "RUF"]
 ignore = ["B008"]  # FastAPI Depends() in defaults
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"]
+"tests/**" = ["S101", "S105", "S106"]  # asserts; fixed test-only keys and passwords
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

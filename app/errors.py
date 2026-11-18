@@ -25,10 +25,17 @@ class AppError(Exception):
     code: ClassVar[str] = "INTERNAL_ERROR"
     default_message: ClassVar[str] = "Internal server error."
 
-    def __init__(self, message: str | None = None, *, code: str | None = None) -> None:
+    def __init__(
+        self,
+        message: str | None = None,
+        *,
+        code: str | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> None:
         self.message = message or self.default_message
         if code is not None:
             self.code = code  # type: ignore[misc]  # per-instance override of the class default
+        self.headers = headers  # extra response headers, e.g. WWW-Authenticate on a 401
         super().__init__(self.message)
 
 
@@ -82,14 +89,22 @@ def _request_id(request: Request) -> str | None:
 
 
 def error_response(
-    request: Request, status_code: int, code: str, message: str, *, add_header: bool = False
+    request: Request,
+    status_code: int,
+    code: str,
+    message: str,
+    *,
+    add_header: bool = False,
+    extra_headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     request_id = _request_id(request)
-    headers = {REQUEST_ID_HEADER: request_id} if add_header and request_id else None
+    headers = dict(extra_headers or {})
+    if add_header and request_id:
+        headers[REQUEST_ID_HEADER] = request_id
     return JSONResponse(
         status_code=status_code,
         content={"code": code, "message": message, "request_id": request_id},
-        headers=headers,
+        headers=headers or None,
     )
 
 
@@ -102,7 +117,9 @@ def _format_validation_errors(exc: RequestValidationError) -> str:
 
 
 async def _app_error_handler(request: Request, exc: AppError) -> JSONResponse:
-    return error_response(request, exc.status_code, exc.code, exc.message)
+    return error_response(
+        request, exc.status_code, exc.code, exc.message, extra_headers=exc.headers
+    )
 
 
 async def _validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
