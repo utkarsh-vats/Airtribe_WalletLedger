@@ -1,15 +1,19 @@
 name: walletledger
 
-# Every host port binds to 127.0.0.1 only and is chosen via .env so it can't clash
-# with other projects on this machine. Every service has a memory limit.
+# Host ports are chosen via .env so they can't clash with other projects on this machine.
+# Postgres and Redis always bind to 127.0.0.1; the API binds to API_BIND_HOST (default
+# 127.0.0.1). Docker-published ports bypass UFW, so bind to a specific interface, never 0.0.0.0.
+# Every variable has a local-dev default, so a fresh clone runs with plain `docker compose up`;
+# .env is an optional override. Every service has a memory limit.
 
 services:
   postgres:
     image: postgres:18.3
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:?set in .env}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
-      POSTGRES_DB: ${POSTGRES_DB:?set in .env}
+      POSTGRES_USER: ${POSTGRES_USER:-walletledger}
+      # Local-only dev default; Postgres is bound to 127.0.0.1. Override in .env.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-walletledger}
+      POSTGRES_DB: ${POSTGRES_DB:-walletledger}
     ports:
       - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
@@ -44,10 +48,10 @@ services:
     environment:
       APP_ENV: ${APP_ENV:-dev}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-walletledger}:${POSTGRES_PASSWORD:-walletledger}@postgres:5432/${POSTGRES_DB:-walletledger}
       REDIS_URL: redis://redis:6379/0
     ports:
-      - "127.0.0.1:${API_HOST_PORT:-8010}:8000"
+      - "${API_BIND_HOST:-127.0.0.1}:${API_HOST_PORT:-8010}:8000"
     depends_on:
       postgres:
         condition: service_healthy
