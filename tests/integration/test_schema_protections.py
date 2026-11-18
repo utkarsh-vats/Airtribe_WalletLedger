@@ -103,6 +103,9 @@ async def test_append_only_tables_reject_changes_even_for_owner(
     owner_tx: AsyncConnection, table: str, statement: str, op: str
 ) -> None:
     await _seed(owner_tx, with_history=True)
+    # Run the seed's pending deferred balance checks (0005) now, as COMMIT would. Otherwise
+    # TRUNCATE is refused earlier with 55006 "pending trigger events", before our trigger runs.
+    await owner_tx.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
 
     nested = await owner_tx.begin_nested()
     with pytest.raises(DBAPIError) as exc_info:

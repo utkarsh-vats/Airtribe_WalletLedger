@@ -164,7 +164,7 @@ Corruption tests bypass these on purpose: they connect as the Postgres superuser
 | `transfers (from_account_id, to_account_id) WHERE status = 'completed'` | New-payee rule |
 | `transfers (to_account_id, created_at)` | Q&A "received" |
 | `transfers (created_at) WHERE status = 'held'` | Admin risk queue |
-| transfers (parent_transfer_id) WHERE parent_transfer_id IS NOT NULL | Reversal finds child fee transfers |
+| `transfers (parent_transfer_id) WHERE parent_transfer_id IS NOT NULL` | Reversal finds child fee transfers |
 | `risk_flags (created_at) WHERE llm_label IS NULL` | Nightly explanation step |
 | `transfer_status_history (transfer_id)` | Transfer detail |
 | `idempotency_keys (created_at)` | Cleanup job |
