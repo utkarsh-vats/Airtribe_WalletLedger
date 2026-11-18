@@ -137,3 +137,44 @@ async def test_function_is_locked_down(app_tx: AsyncConnection) -> None:
     assert security_definer is True
     assert config == ["search_path=pg_catalog, public"]
     assert app_can_execute is False
+
+
+async def test_settings_do_not_leak_to_next_transaction_on_same_connection(
+    conn: AsyncConnection,
+) -> None:
+    """A pooled connection reused after a transaction that set actor and reason. Once a custom
+    setting has been set, current_setting(..., true) returns '' (not NULL) after the transaction
+    ends, so the trigger's NULLIF is what turns "unset" into NULL instead of failing the
+    ''::BIGINT cast. Transaction 1 rolls back because committed history rows can't be removed;
+    SET LOCAL values are discarded the same way on COMMIT."""
+    trans = await conn.begin()
+    user_id, a, b = await _user_and_wallets(conn)
+    x = await _held_transfer(conn, user_id, a, b)
+    await set_actor(conn, user_id)
+    await set_status_reason(conn, "first transaction")
+    await conn.execute(text("UPDATE transfers SET status = 'rejected' WHERE id = :x"), {"x": x})
+    assert (await _history(conn, x))[-1] == ("held", "rejected", user_id, "first transaction")
+    await trans.rollback()
+
+    trans = await conn.begin()
+    try:
+        leftover = (
+            await conn.execute(
+                text(
+                    "SELECT current_setting('app.actor_id', true), "
+                    "current_setting('app.status_reason', true)"
+                )
+            )
+        ).one()
+        assert tuple(leftover) == ("", "")
+
+        user_id, a, b = await _user_and_wallets(conn)
+        y = await _held_transfer(conn, user_id, a, b)
+        await conn.execute(text("UPDATE transfers SET status = 'rejected' WHERE id = :y"), {"y": y})
+
+        assert await _history(conn, y) == [
+            (None, "held", None, None),
+            ("held", "rejected", None, None),
+        ]
+    finally:
+        await trans.rollback()

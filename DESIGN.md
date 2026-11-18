@@ -148,7 +148,7 @@ Column-level constraints settled during schema review (nullability, ranges, enum
 | Entries append-only | `BEFORE UPDATE OR DELETE` row trigger and `BEFORE TRUNCATE` statement trigger raise; app role has only `SELECT, INSERT` on `ledger_entries` |
 | Audit log append-only | Same triggers on transfer_status_history; wallet_app gets SELECT only. Rows are written solely by the status-history trigger (SECURITY DEFINER, owned by wallet_owner, search_path pinned) |
 | Every transfer balances | Two CONSTRAINT TRIGGERs, DEFERRABLE INITIALLY DEFERRED (AFTER INSERT ON ledger_entries; AFTER INSERT OR UPDATE OF status ON transfers), call one check at commit: a completed or reversed transfer has at least one entry and Σ debits and Σ credits each equal transfers.amount; a held or rejected transfer has no entries. Violations raise SQLSTATE 23514 |
-| Every status change audited | `AFTER INSERT OR UPDATE OF status ON transfers` trigger writes history, reading the actor from `current_setting('app.actor_id', true)` set via `SET LOCAL` in the service transaction |
+| Every status change audited | `AFTER INSERT OR UPDATE OF status ON transfers` trigger (real changes only) writes history, reading the actor from `current_setting('app.actor_id', true)` and the reason from `current_setting('app.status_reason', true)`, both set transaction-locally in the service transaction |
 | Idempotency key unique per user | `UNIQUE NULLS NOT DISTINCT (user_id, key)` |
 | Least privilege | Two roles: `wallet_owner` (migrations) and `wallet_app` (runtime). `wallet_app` gets column-level `UPDATE (status, updated_at)` on `transfers` |
 
