@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # CI-only credentials for throwaway service containers; not secrets.
+    env:
+      POSTGRES_USER: walletledger
+      POSTGRES_PASSWORD: walletledger
+      POSTGRES_DB: walletledger
+      POSTGRES_TEST_DB: walletledger_test
+      WALLET_OWNER_PASSWORD: wallet_owner
+      WALLET_APP_PASSWORD: wallet_app
+      DATABASE_URL: postgresql+asyncpg://wallet_app:wallet_app@localhost:5432/walletledger
+      TEST_DATABASE_URL: postgresql+asyncpg://wallet_app:wallet_app@localhost:5432/walletledger_test
+      MIGRATION_DATABASE_URL: postgresql+asyncpg://wallet_owner:wallet_owner@localhost:5432/walletledger
+      TEST_MIGRATION_DATABASE_URL: postgresql+asyncpg://wallet_owner:wallet_owner@localhost:5432/walletledger_test
+      REDIS_URL: redis://localhost:6379/0
+
+    services:
+      postgres:
+        image: postgres:18.3
+        env:
+          POSTGRES_USER: walletledger
+          POSTGRES_PASSWORD: walletledger
+          POSTGRES_DB: walletledger
+        ports:
+          - 5432:5432
+        # TCP check, same as docker-compose.yml.
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U walletledger -d walletledger"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:8
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: "0.13.9"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Lint
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      # Service containers can't mount docker-entrypoint-initdb.d, so run the same init script
+      # inside the container: same roles, same walletledger_test database as docker compose.
+      - name: Create roles and test database
+        run: >-
+          docker exec -i
+          -e POSTGRES_USER -e POSTGRES_DB -e POSTGRES_TEST_DB
+          -e WALLET_OWNER_PASSWORD -e WALLET_APP_PASSWORD
+          ${{ job.services.postgres.id }}
+          bash -s < docker/postgres/initdb/01-roles-and-databases.sh
+
+      - name: Migrate (dev and test databases, as the migrate service does)
+        run: |
+          uv run alembic upgrade head
+          uv run alembic -x target=test upgrade head
+
+      - name: Test
+        run: uv run pytest -q
+
+  # Fresh-clone check: the whole stack must start from docker-compose.yml defaults alone.
+  compose-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Ensure there is no .env (compose defaults only)
+        run: test ! -e .env
+
+      - name: Start the stack
+        run: docker compose up -d --build
+
+      # Plain retry loop rather than `up --wait`: --wait's handling of the one-shot migrate
+      # service has varied across compose versions, and this checks the real endpoint.
+      - name: Wait for /health (90s cap)
+        run: |
+          for _ in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:8010/health; then echo; exit 0; fi
+            sleep 2
+          done
+          echo "::error::/health did not answer within 90s"
+          exit 1
+
+      - name: Assert migrate exited 0
+        run: |
+          docker compose ps -a
+          cid=$(docker compose ps -a -q migrate)
+          status=$(docker inspect -f '{{.State.Status}}' "$cid")
+          code=$(docker inspect -f '{{.State.ExitCode}}' "$cid")
+          echo "migrate: status=$status exit=$code"
+          test "$status" = exited && test "$code" = 0
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose logs --no-color --timestamps
+
+      # Throwaway runner: removing volumes here loses nothing.
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
