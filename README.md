@@ -36,6 +36,8 @@ The default passwords are weak on purpose and safe only because Postgres and Red
 | `WALLET_OWNER_PASSWORD` / `WALLET_APP_PASSWORD` | `wallet_owner` / `wallet_app` | App roles, see below |
 | `DATABASE_URL`, `TEST_DATABASE_URL`, `MIGRATION_DATABASE_URL`, `TEST_MIGRATION_DATABASE_URL` | localhost:5433 URLs | Running the app, tests and Alembic from the host |
 | `JWT_SECRET` | A dev-only value, refused when `APP_ENV=prod` | Signing access tokens; at least 32 bytes. Generate one with `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Empty (no admin is created) | The admin user, seeded into the dev database by `migrate`; the password needs at least 12 characters |
+| `ADMIN_PHONE` | `+910000000000` | The seeded admin's phone (the column is required) |
 
 Postgres reads its passwords only when the data volume is first created. After changing them,
 or `docker/postgres/initdb/`, the volume has to be recreated with
@@ -79,7 +81,8 @@ uv run alembic -x target=test upgrade head     # test database
 uv run alembic upgrade head --sql              # print the SQL instead of running it
 ```
 
-`docker compose up` runs both upgrades for you through the `migrate` service.
+`docker compose up` runs both upgrades for you through the `migrate` service, and then seeds the
+admin user into the dev database (see [Authentication](#authentication)).
 
 | Migration | Adds |
 |---|---|
@@ -91,6 +94,8 @@ uv run alembic upgrade head --sql              # print the SQL instead of runnin
 | `0006` | Status-history trigger |
 | `0007` | `idempotency_keys`, `risk_rules` (seeded), `risk_flags`, `reconciliation_runs`, `reconciliation_issues`, `job_locks` (seeded) |
 | `0008` | Revokes `TEMPORARY` from `wallet_app` |
+| `0009` | Lets `wallet_app` update `users.password_hash`, so login can upgrade old hashes |
+| `0010` | Column-level `INSERT` grants on `users` and `accounts` |
 
 ## Schema and what the database enforces
 
@@ -107,7 +112,7 @@ can't break them:
 | Every transfer balances | Deferred constraint triggers check at `COMMIT`: a completed or reversed transfer has entries whose debits and credits each equal its amount; a held or rejected one has none. Violations raise SQLSTATE `23514` |
 | Every status change is recorded | A trigger writes `transfer_status_history` on insert and on every real status change. The actor and the reason come from `app.actor_id` and `app.status_reason`, set for the current transaction only by `app/db.py` (`set_actor`, `set_status_reason`) |
 | A retried request can't run twice | `UNIQUE NULLS NOT DISTINCT (user_id, key)` on `idempotency_keys` |
-| The runtime role can only do its job | `wallet_app` gets table and column grants written in each migration, for example only `UPDATE (status, updated_at)` on `transfers`. It can't create any object |
+| The runtime role can only do its job | `wallet_app` gets table and column grants written in each migration, for example only `UPDATE (status, updated_at)` on `transfers`. On `users` it can insert only `name`, `email`, `phone` and `password_hash`, so role and KYC status always start at `user` / `pending`. On `accounts` it can insert only `user_id`, `account_type` and `label`, so every wallet starts at a zero balance and gains money only through ledger postings. It can't create any object |
 
 Two of these triggers need care when changing them:
 
@@ -124,7 +129,28 @@ fails if a new constraint is added without one.
 
 ## Authentication
 
-Login endpoints arrive in step 2.1b; the pieces they use are in `app/auth/`.
+| Endpoint | Who | Does |
+|---|---|---|
+| `POST /users` | Anyone | Registers a user: `{name, email, phone, password}` → `201`. New users are role `user`, KYC `pending` |
+| `POST /auth/login` | Anyone | `{email, password}` → `200 {access_token, token_type: "bearer"}` |
+| `POST /admin/users/{id}/kyc` | Admin | `{kyc_status: "pending" \| "verified" \| "rejected"}` → `200` with the user; `404 USER_NOT_FOUND` |
+
+These don't take an `Idempotency-Key` yet; every `POST` except login will require one from
+milestone M3.
+
+- **Registration** normalizes the phone to E.164 before storing it, so `98765 43210`,
+  `09876543210` and `+91 98765 43210` are one number. A bare 10-digit number is read as an
+  Indian mobile; other countries need the `+` prefix. An email or phone already in use gets
+  `409 EMAIL_ALREADY_REGISTERED` or `409 PHONE_ALREADY_REGISTERED`. That does reveal whether an
+  email or phone is registered, which the contract requires. Unknown fields such as `role` are
+  rejected with `400`.
+- **Login** gives one answer, `401 INVALID_CREDENTIALS`, for an unknown email and for a wrong
+  password. An unknown email still costs a full password check, so response time doesn't give it
+  away. The password check runs between two short database transactions, never inside one.
+- **The admin** is created by `migrate` from `ADMIN_EMAIL` and `ADMIN_PASSWORD`, running as
+  `wallet_owner`, because `wallet_app` can't create admins. It is skipped when either variable
+  is empty. Rerunning it with a new `ADMIN_PASSWORD` resets the admin's password. If
+  `ADMIN_EMAIL` belongs to an existing non-admin user, `migrate` fails instead of promoting them.
 
 - **Access tokens** are HS256 JWTs signed with `JWT_SECRET`, valid for 60 minutes, with no
   refresh tokens. They carry the user id (`sub`) and `role`. Routes take the caller from the

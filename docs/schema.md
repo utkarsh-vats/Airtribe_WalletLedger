@@ -131,6 +131,8 @@ These are decided here, beyond what `DESIGN.md` §3.2 lists:
 | `reconciliation_runs` lifecycle | `queued`: no `started_at`/`finished_at`; `running`: `started_at` only; `passed`/`failed`/`skipped`/`error`: both, `finished_at >= started_at` | Timings in the run report always match the status. A skipped run was marked `running` first (DESIGN.md §8.1). |
 | `reconciliation_runs` outcome | `passed` ⇒ `issue_count = 0`; `failed` ⇒ `issue_count > 0`; `error` ⇒ `error_message` set | The status can't contradict the findings, and an errored run always says why. |
 | `job_locks` seed | One row each: `reconciliation`, `flag_explanations`, `idempotency_cleanup` | One lockable row per scheduled job; DESIGN.md names `reconciliation`, the other two are the remaining nightly jobs. |
+| `users` inserts by `wallet_app` | Column-level `INSERT (name, email, phone, password_hash)` (migration 0010) | `role` and `kyc_status` always take their defaults, so the runtime role can't create an admin or a pre-verified user. Admins come only from the seed, run as `wallet_owner`. |
+| `accounts` inserts by `wallet_app` | Column-level `INSERT (user_id, account_type, label)` (migration 0010) | A wallet always starts with `balance = 0` and `held_amount = 0` and gains money only through ledger postings. `currency` takes its `'INR'` default. |
 
 ## 5. ER diagram
 
