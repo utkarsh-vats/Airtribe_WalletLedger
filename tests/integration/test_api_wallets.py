@@ -8,6 +8,7 @@ from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from app.auth.passwords import hash_password
 from tests.integration.conftest import API_TEST_EMAIL_DOMAIN
 
 PASSWORD = "correct horse battery"
@@ -37,6 +38,25 @@ async def alice(api: AsyncClient) -> Caller:
 @pytest.fixture
 async def bob(api: AsyncClient) -> Caller:
     return await _caller(api, "bob")
+
+
+@pytest.fixture
+async def admin(api: AsyncClient, owner_engine: AsyncEngine) -> Caller:
+    email = f"admin-{uuid.uuid4().hex[:8]}@{API_TEST_EMAIL_DOMAIN}"
+    async with owner_engine.begin() as owner:  # admins exist only via the owner-run seed
+        admin_id = await owner.scalar(
+            text(
+                "INSERT INTO users (name, email, phone, password_hash, role) "
+                "VALUES ('Admin', :e, :p, :h, 'admin') RETURNING id"
+            ),
+            {
+                "e": email,
+                "p": f"+9194{uuid.uuid4().int % 10**8:08d}",
+                "h": await hash_password(PASSWORD),
+            },
+        )
+    login = await api.post("/auth/login", json={"email": email, "password": PASSWORD})
+    return Caller(admin_id, {"Authorization": f"Bearer {login.json()['access_token']}"})
 
 
 # --- POST /users/{id}/wallets ---
@@ -205,3 +225,33 @@ async def test_bad_wallet_id_is_400(api: AsyncClient, alice: Caller, wallet_id: 
     response = await api.get(f"/wallets/{wallet_id}/balance", headers=alice.headers)
 
     assert response.status_code == 400
+
+
+# --- admin read access (DESIGN.md §6) ---
+
+
+async def test_admin_reads_any_users_wallet(api: AsyncClient, alice: Caller, admin: Caller) -> None:
+    wallet_id = await _wallet(api, alice)
+
+    response = await api.get(f"/wallets/{wallet_id}/balance", headers=admin.headers)
+
+    assert response.status_code == 200
+    assert response.json()["wallet_id"] == wallet_id
+
+
+@pytest.mark.parametrize("wallet_id", [1, 2, 3], ids=["cash_in", "cash_out", "fee_revenue"])
+async def test_admin_gets_404_for_system_accounts(
+    api: AsyncClient, admin: Caller, wallet_id: int
+) -> None:
+    response = await api.get(f"/wallets/{wallet_id}/balance", headers=admin.headers)
+
+    assert response.status_code == 404
+    assert response.json()["code"] == "WALLET_NOT_FOUND"
+
+
+async def test_admin_still_cannot_open_a_wallet_for_someone_else(
+    api: AsyncClient, alice: Caller, admin: Caller
+) -> None:
+    response = await api.post(f"/users/{alice.id}/wallets", headers=admin.headers)
+
+    assert response.status_code == 403

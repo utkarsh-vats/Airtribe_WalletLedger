@@ -252,7 +252,7 @@ Keys older than 24 hours are deleted by a nightly worker task.
 - Admin user seeded from env (`ADMIN_EMAIL`, `ADMIN_PASSWORD`) by the migrate service.
 - `POST /admin/users/{id}/kyc` — admin sets `kyc_status`. Not in the brief's contract; added because withdrawals are KYC-gated.
 
-Ownership rules: users act only on their own wallets and `/users/{id}/…` paths where `id` is themselves (`403 FORBIDDEN` otherwise). `GET /transfers/{id}` is visible to either party or an admin. `/admin/*` and reversals require `role = admin`.
+Ownership rules: users act only on their own wallets and `/users/{id}/…` paths where `id` is themselves (`403 FORBIDDEN` otherwise). Admins also have read access to any user wallet's balance and statement (`GET /wallets/{id}/balance`, `GET /wallets/{id}/statement`); opening wallets stays self-only. `GET /transfers/{id}` is visible to either party or an admin. `/admin/*` and reversals require `role = admin`.
 
 ---
 

@@ -80,13 +80,15 @@ async def create_wallet(
 async def get_balance(
     conn: AsyncConnection, wallet_id: int, *, caller: Principal
 ) -> BalanceResponse:
-    """Balance, held and available from one row, so the three always agree."""
+    """Balance, held and available from one row, so the three always agree.
+
+    Readable by the wallet's owner or any admin (DESIGN.md §6)."""
     async with transaction(conn):
         account = await repository.get_account(conn, wallet_id)
 
     # System accounts look like unknown wallets: users have no business with their ids.
     if account is None or account["account_type"] != "user_wallet":
         raise NotFoundError("Wallet not found.", code="WALLET_NOT_FOUND")
-    if account["user_id"] != caller.id:
+    if account["user_id"] != caller.id and not caller.is_admin:
         raise ForbiddenError("You can only see your own wallets.")
     return BalanceResponse.model_validate({**account, "wallet_id": account["id"]})

@@ -55,5 +55,5 @@ async def create_wallet(
 
 @wallet_router.get("/wallets/{wallet_id}/balance", response_model=BalanceResponse)
 async def get_balance(wallet_id: PositiveId, conn: Conn, user: CurrentUser) -> BalanceResponse:
-    """Balance, held and available, in paise. Only for your own wallets."""
+    """Balance, held and available, in paise. Your own wallets, or any wallet for an admin."""
     return await service.get_balance(conn, wallet_id, caller=user)
