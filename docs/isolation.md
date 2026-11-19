@@ -367,6 +367,7 @@ Every number and every error matched the script's predictions. Some details are 
   by failing a transaction with `40001`, which every client would have to retry. Under
   contention, such as a stampede on one wallet, that means a lot of retries.
 - **The plain read-check-write pattern** (case 2 at READ COMMITTED) is exactly the bug step 2.4's
-  `naive_transfer_demo.py` reproduces under load.
+  `naive_transfer_demo.py` reproduces under load (results in
+  [`naive-transfer.md`](naive-transfer.md)).
 - **Multi-table reports that must agree with themselves,** such as reconciliation, use one
   REPEATABLE READ snapshot (case 5).

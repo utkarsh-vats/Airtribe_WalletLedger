@@ -169,6 +169,70 @@ milestone M3.
   Hashes record their own parameters, so if the parameters change, an older hash is upgraded
   on the user's next successful login.
 
+## Wallets
+
+| Endpoint | Who | Does |
+|---|---|---|
+| `POST /users/{id}/wallets` | That user only | Opens a wallet: optional `{label}` (1–50 characters, default `"main"`) → `201 {id, user_id, label, currency, balance, held_amount, available, created_at}` |
+| `GET /wallets/{id}/balance` | The wallet's owner, or an admin | `200 {wallet_id, currency, balance, held_amount, available}` |
+
+All amounts are integer paise, and `available = balance − held_amount`. A new wallet is in INR
+with a zero balance. The database sets those values, and `wallet_app` can't write them on
+insert.
+
+**Ownership rules:**
+
+- **Opening a wallet is self-only, admins included.** Opening one under another user's id gets
+  `403 FORBIDDEN`, and nobody can open a wallet on someone else's behalf. A user can hold
+  several wallets with different labels; reusing one of their own labels gets
+  `409 WALLET_LABEL_TAKEN`.
+- **Reading a balance** is allowed for the wallet's owner, and for an admin on any user's
+  wallet. Another user gets `403 FORBIDDEN`. The statement endpoint (step 2.10) will follow the
+  same rule.
+- **System accounts** (`cash_in`, `cash_out` and `fee_revenue`, ids 1–3) aren't wallets. Their
+  ids get `404 WALLET_NOT_FOUND` for everyone, admins included, exactly like an id that doesn't
+  exist.
+
+## Isolation and concurrency
+
+[`docs/isolation.md`](docs/isolation.md) records a two-session lab run in real `psql` sessions,
+with the commands and their actual output:
+
+| Case | Result |
+|---|---|
+| 1. Re-read after another session commits | READ COMMITTED sees the new value; REPEATABLE READ keeps its snapshot until the transaction ends |
+| 2. Lost update from read-check-write | READ COMMITTED lets both withdrawals commit, and one overwrites the other; REPEATABLE READ fails the second with `40001` |
+| 3. READ COMMITTED + `SELECT … FOR UPDATE` (the design's fix) | The second session waits for the lock, then reads the current balance and refuses; no error, no retry |
+| 4. Write skew across two rows | REPEATABLE READ lets both commit; SERIALIZABLE cancels one with `40001` |
+| 5. REPEATABLE READ with a join | One consistent snapshot across both tables, taken at the first query, not at `BEGIN` |
+
+So every transfer runs at READ COMMITTED and locks the accounts it touches in ascending id
+order before checking funds. Reconciliation reads at REPEATABLE READ. To re-run the lab, with
+the compose stack up and `tmux` installed:
+
+```bash
+scripts/run_isolation_lab.sh      # writes notes/lab-A.log and notes/lab-B.log
+```
+
+[`docs/naive-transfer.md`](docs/naive-transfer.md) shows the same bug under load. 75 concurrent
+₹10 withdrawals from a ₹500 wallet, so at most 50 can succeed:
+
+| Variant | Succeeded | Final balance (paise) | Outcome |
+|---|---:|---:|---|
+| naive-absolute (`SET balance = <computed>`) | 75 | 49000 | ₹740 paid out without being deducted |
+| naive-relative (`SET balance = balance − amount`) | 75 | −25000 | Overdraft |
+| locked (`SELECT … FOR UPDATE`, then check) | 50 | 0 | Correct |
+
+A barrier forces every naive withdrawal to read before any writes, so the result is exact on
+every run. With `--no-barrier` (random think time) the results were the same except the
+absolute variant ended at 48000. The real schema's `accounts_available_check` would stop the
+relative overdraft. It can't stop the absolute lost update, because 49000 is a legal balance.
+So the design relies on row locks, with constraints as a backstop.
+
+```bash
+uv run python scripts/naive_transfer_demo.py --workers 75 --balance 50000 --amount 1000 [--no-barrier]
+```
+
 ## Development and tests
 
 Requires [uv](https://docs.astral.sh/uv/); Python 3.14 is installed by uv from `.python-version`.
