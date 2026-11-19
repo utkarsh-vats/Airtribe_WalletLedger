@@ -23,16 +23,16 @@ and why the wallet's transfer services run at **READ COMMITTED with explicit row
 
 ## Which case answers what
 
-> **Brief wording to confirm.** The brief's own names for its four cases aren't in the repo yet.
-> The first column describes each case by the behaviour it demonstrates; replace it with the
-> brief's wording.
-
 | Brief case | Lab case | What the run shows |
 |---|---|---|
-| Non-repeatable read: READ COMMITTED vs REPEATABLE READ | [1](#case-1-non-repeatable-read) | READ COMMITTED re-reads see B's commit (100000 → 105000); REPEATABLE READ keeps reading 100000 until its own `COMMIT` |
-| Lost update, and how to prevent it | [2](#case-2-lost-update-from-read-check-write), [3](#case-3-the-designs-fix-read-committed--select--for-update) | Read-check-write under READ COMMITTED pays out 140000 while deducting 70000. REPEATABLE READ refuses with `40001`. READ COMMITTED plus `FOR UPDATE` makes B wait and then see the new balance (30000) |
-| Write skew: REPEATABLE READ vs SERIALIZABLE | [4](#case-4-write-skew-across-two-rows) | REPEATABLE READ lets two withdrawals from different rows break a cross-row rule (total −100000); SERIALIZABLE cancels B with `40001` (total 50000) |
-| A join under REPEATABLE READ, and when the snapshot is taken | [5](#case-5-one-snapshot-across-a-join-taken-at-the-first-query) | Both tables of a join come from one snapshot; that snapshot is taken by the first query, not by `BEGIN` |
+| 1. "Read Committed (the Postgres default): session A reads a wallet balance, session B updates it and commits, then session A reads again. Does A see a different value?" | [1](#case-1-non-repeatable-read), READ COMMITTED half | Yes. A's second read in the same transaction sees B's commit: 100000, then 105000 |
+| 2. "Repeatable Read: repeat the same steps. What does session A see now?" | [1](#case-1-non-repeatable-read), REPEATABLE READ half | The same value both times, 100000. B's commit (105000) appears only after A's `COMMIT` |
+| 3. "Serializable: two sessions each read a balance and then write based on it. What happens to one of them? Note the error." | [4](#case-4-write-skew-across-two-rows), plus [2](#case-2-lost-update-from-read-check-write) for the same-row variant | Under SERIALIZABLE, B is cancelled at its write with `ERROR: could not serialize access due to read/write dependencies among transactions` (SQLSTATE `40001`); the total ends at 50000 instead of −100000. Same-row variant: B gets `could not serialize access due to concurrent update` |
+| 4. "Repeatable Read with a join: repeat case 2 using a query that joins two tables. Does the guarantee still hold?" | [5](#case-5-one-snapshot-across-a-join-taken-at-the-first-query) | Yes. Both tables of the join come from one snapshot, so B's committed changes to either table stay invisible until A commits. The snapshot is taken at A's first query, not at `BEGIN` |
+
+Lab [case 3](#case-3-the-designs-fix-read-committed--select--for-update) goes beyond the brief's
+four. It is the design's chosen fix (`DESIGN.md` §4): READ COMMITTED plus `SELECT … FOR
+UPDATE`. B waits for the lock, then reads the current balance (30000, not 100000) and refuses.
 
 Every result matched what the script predicted. The few details worth knowing are under
 [Differences from the script's predictions](#differences-from-the-scripts-predictions).
