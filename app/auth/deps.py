@@ -47,3 +47,9 @@ async def require_admin(user: Annotated[Principal, Depends(current_user)]) -> Pr
 
 CurrentUser = Annotated[Principal, Depends(current_user)]
 AdminUser = Annotated[Principal, Depends(require_admin)]
+
+
+def require_self(user: Principal, user_id: int) -> None:
+    """`/users/{id}/…` routes act only on the caller's own id (DESIGN.md §6)."""
+    if user.id != user_id:
+        raise ForbiddenError("You can only act on your own account.")

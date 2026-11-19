@@ -33,3 +33,33 @@ async def update_kyc_status(
         )
     ).one_or_none()
     return None if row is None else dict(row._mapping)
+
+
+async def insert_wallet(conn: AsyncConnection, *, user_id: int, label: str) -> dict[str, object]:
+    """Names only the columns wallet_app may insert (0010): currency, balance and held_amount
+    take their defaults, so a new wallet is always INR with nothing in it."""
+    row = (
+        await conn.execute(
+            text(
+                "INSERT INTO accounts (user_id, account_type, label) "
+                "VALUES (:u, 'user_wallet', :label) "
+                "RETURNING id, user_id, account_type, label, currency, balance, held_amount, "
+                "balance - held_amount AS available, created_at"
+            ),
+            {"u": user_id, "label": label},
+        )
+    ).one()
+    return dict(row._mapping)
+
+
+async def get_account(conn: AsyncConnection, account_id: int) -> dict[str, object] | None:
+    row = (
+        await conn.execute(
+            text(
+                "SELECT id, user_id, account_type, label, currency, balance, held_amount, "
+                "balance - held_amount AS available, created_at FROM accounts WHERE id = :id"
+            ),
+            {"id": account_id},
+        )
+    ).one_or_none()
+    return None if row is None else dict(row._mapping)

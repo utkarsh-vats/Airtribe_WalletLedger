@@ -23,6 +23,36 @@ class CreateUserRequest(BaseModel):
 
 
 KycStatus = Literal["pending", "verified", "rejected"]
+Label = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)]
+
+
+class CreateWalletRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: Label = "main"
+
+
+class WalletResponse(BaseModel):
+    """Amounts in paise. available = balance - held_amount (never negative, by CHECK)."""
+
+    id: int
+    user_id: int
+    label: str
+    currency: str
+    balance: int
+    held_amount: int
+    available: int
+    created_at: datetime
+
+
+class BalanceResponse(BaseModel):
+    """Amounts in paise, all read from one row at one moment."""
+
+    wallet_id: int
+    currency: str
+    balance: int
+    held_amount: int
+    available: int
 
 
 class SetKycRequest(BaseModel):

@@ -4,10 +4,18 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.auth.passwords import hash_password
-from app.db import UNIQUE_VIOLATION, constraint_violated, transaction
-from app.errors import ConflictError, NotFoundError
+from app.auth.tokens import Principal
+from app.db import FOREIGN_KEY_VIOLATION, UNIQUE_VIOLATION, constraint_violated, transaction
+from app.errors import ConflictError, ForbiddenError, NotFoundError
 from app.wallet import repository
-from app.wallet.schemas import CreateUserRequest, SetKycRequest, UserResponse
+from app.wallet.schemas import (
+    BalanceResponse,
+    CreateUserRequest,
+    CreateWalletRequest,
+    SetKycRequest,
+    UserResponse,
+    WalletResponse,
+)
 
 _UNIQUE_USER_FIELDS = {
     "users_email_lower_key": ("EMAIL_ALREADY_REGISTERED", "That email is already registered."),
@@ -47,3 +55,38 @@ async def set_kyc_status(
     if row is None:
         raise NotFoundError("User not found.", code="USER_NOT_FOUND")
     return UserResponse.model_validate(row)
+
+
+async def create_wallet(
+    conn: AsyncConnection, user_id: int, request: CreateWalletRequest
+) -> WalletResponse:
+    """Open a wallet for `user_id`. The router has already checked the caller is that user."""
+    try:
+        async with transaction(conn):
+            row = await repository.insert_wallet(conn, user_id=user_id, label=request.label)
+    except IntegrityError as exc:
+        if constraint_violated(exc, UNIQUE_VIOLATION) == "accounts_user_label_key":
+            raise ConflictError(
+                f"You already have a wallet labelled {request.label!r}.",
+                code="WALLET_LABEL_TAKEN",
+            ) from None
+        if constraint_violated(exc, FOREIGN_KEY_VIOLATION) is not None:
+            # A valid token for a user that no longer exists.
+            raise NotFoundError("User not found.", code="USER_NOT_FOUND") from None
+        raise
+    return WalletResponse.model_validate(row)
+
+
+async def get_balance(
+    conn: AsyncConnection, wallet_id: int, *, caller: Principal
+) -> BalanceResponse:
+    """Balance, held and available from one row, so the three always agree."""
+    async with transaction(conn):
+        account = await repository.get_account(conn, wallet_id)
+
+    # System accounts look like unknown wallets: users have no business with their ids.
+    if account is None or account["account_type"] != "user_wallet":
+        raise NotFoundError("Wallet not found.", code="WALLET_NOT_FOUND")
+    if account["user_id"] != caller.id:
+        raise ForbiddenError("You can only see your own wallets.")
+    return BalanceResponse.model_validate({**account, "wallet_id": account["id"]})

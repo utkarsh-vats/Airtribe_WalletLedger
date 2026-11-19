@@ -105,8 +105,15 @@ async def api(
         ):
             yield client
     finally:
+        pattern = {"pattern": f"%@{API_TEST_EMAIL_DOMAIN}"}
         async with owner_engine.begin() as owner:
+            # Wallets reference their user. No transfers exist yet in API tests; once they do,
+            # this must become the superuser reset planned for 2.9 (append-only tables).
             await owner.execute(
-                text("DELETE FROM users WHERE email LIKE :pattern"),
-                {"pattern": f"%@{API_TEST_EMAIL_DOMAIN}"},
+                text(
+                    "DELETE FROM accounts WHERE user_id IN "
+                    "(SELECT id FROM users WHERE email LIKE :pattern)"
+                ),
+                pattern,
             )
+            await owner.execute(text("DELETE FROM users WHERE email LIKE :pattern"), pattern)

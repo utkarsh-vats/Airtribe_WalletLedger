@@ -10,7 +10,8 @@ from app.db import create_engine
 from app.errors import register_error_handlers
 from app.middleware import RequestIdMiddleware
 from app.wallet.router import admin_router as wallet_admin_router
-from app.wallet.router import router as wallet_router
+from app.wallet.router import router as user_router
+from app.wallet.router import wallet_router
 
 
 def create_app(settings: Settings | None = None, clock: Clock | None = None) -> FastAPI:
@@ -37,6 +38,7 @@ def create_app(settings: Settings | None = None, clock: Clock | None = None) -> 
     app.add_middleware(RequestIdMiddleware)
     register_error_handlers(app)
     app.include_router(auth_router)
+    app.include_router(user_router)
     app.include_router(wallet_router)
     app.include_router(wallet_admin_router)
 
