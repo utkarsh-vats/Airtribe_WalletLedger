@@ -11,6 +11,9 @@
 # return once A's step 3c commits. Any other step that doesn't return within STEP_TIMEOUT seconds
 # is a failure: both panes are dumped and the run stops.
 #
+# At the end, and on failure, it quits both psql sessions (\q) and waits for them to exit before
+# removing the session, so no psql is left connected inside the container.
+#
 # Only ever creates and kills the tmux session named `isolab` (exact match); other tmux sessions
 # are never touched. Needs the compose stack running (`docker compose -p walletledger up -d`).
 set -euo pipefail
@@ -18,6 +21,7 @@ set -euo pipefail
 SESSION="isolab"
 TARGET="=$SESSION"            # '=' = exact name match, never a prefix of another session
 STEP_TIMEOUT="${STEP_TIMEOUT:-10}"
+QUIT_TIMEOUT="${QUIT_TIMEOUT:-5}"   # seconds for both psql sessions to exit at the end
 LOCK_WAIT_STEP="3b"           # sent to B, expected to block until A's next step commits
 LOCK_RELEASE_STEP="3c"
 
@@ -52,11 +56,46 @@ capture_scrollback() {
   CAPTURED=1
 }
 
+pane_alive() {  # pane id: still part of the isolab session?
+  tmux list-panes -s -t "$TARGET" -F '#{pane_id}' 2>/dev/null | grep -Fxq -- "$1"
+}
+
+quit_psql() {
+  # Killing the tmux session would only kill the `docker compose exec` client: the psql inside
+  # the container would stay connected to Postgres. So quit psql first. C-c cancels a running
+  # query or a half-typed line (a quit mid-transaction rolls it back), then \q exits; the
+  # pane closes once docker compose exec has returned, i.e. once psql has really exited.
+  local pane name deadline
+  for pane in "$PANE_A" "$PANE_B"; do
+    [[ -n "$pane" ]] && pane_alive "$pane" || continue
+    tmux send-keys -t "$pane" C-c
+    tmux send-keys -t "$pane" -l -- '\q'
+    tmux send-keys -t "$pane" Enter
+  done
+  deadline=$((SECONDS + QUIT_TIMEOUT))
+  for name in A B; do
+    pane="$(pane_of "$name")"
+    [[ -n "$pane" ]] || continue
+    while pane_alive "$pane"; do
+      if (( SECONDS >= deadline )); then
+        log "WARNING: psql in pane $name did not exit within ${QUIT_TIMEOUT}s; killing the" \
+          "session anyway, so a psql may be left connected (check pg_stat_activity)"
+        return 0
+      fi
+      sleep 0.2
+    done
+  done
+}
+
 cleanup() {
   local status=$?
   if tmux has-session -t "$TARGET" 2>/dev/null; then
     capture_scrollback
-    tmux kill-session -t "$TARGET"
+    quit_psql
+    # Normally both panes have exited by now and the session is already gone.
+    if tmux has-session -t "$TARGET" 2>/dev/null; then
+      tmux kill-session -t "$TARGET"
+    fi
   fi
   rm -rf "$WORK"
   exit "$status"
